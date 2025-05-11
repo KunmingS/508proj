@@ -1,0 +1,7 @@
+Step 0, Loss: 11.8998
+Step 0, Loss: 11.9539
+Step 0, Loss: 11.9369
+Step 1, Loss: 11.9035
+Step 2, Loss: 11.9094
+Step 3, Loss: 12.0045
+Step 4, Loss: 11.9376

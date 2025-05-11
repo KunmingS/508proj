@@ -1,0 +1,100 @@
+import os
+import torch
+from torch.utils.data import Dataset, DataLoader
+from llama.model import Llama, ModelArgs
+from llama.tokenizer import Tokenizer
+from torch import nn, optim
+from tqdm import tqdm
+import requests
+
+#parameters
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+checkppoint_dir = os.path.expanduser("~/.llama/checkpoints/Llama3.2-1B")
+MODEL_PATH = os.path.join(checkppoint_dir, "tokenizer.model")
+GRAD_ACCUM_STEPS = 8
+LEARNING_RATE = 1e-5
+BATCH_SIZE = 1
+EPOCHS = 3
+
+#define the Alpaca dataset
+class AlpacaDataset(Dataset):
+    def __init__(self, data, tokenizer):
+        self.data = data
+        self.tokenizer = tokenizer
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        prompt = self.data[idx]["instruction"]
+        if self.data[idx]["input"]:
+            prompt += "\n" + self.data[idx]["input"]
+        target = self.data[idx]["output"]
+
+        prompt_ids = self.tokenizer.encode(prompt, bos=True, eos=False)
+        target_ids = self.tokenizer.encode(target, bos=False, eos=True)
+        input_ids = prompt_ids + target_ids
+        labels = [-100] * len(prompt_ids) + target_ids  # prompt 部分不参与 loss
+
+        return torch.tensor(input_ids), torch.tensor(labels)
+
+#pading aligning
+def collate(batch):
+    input_ids, labels = zip(*batch)
+    max_len = max(len(x) for x in input_ids)
+    input_ids = [torch.cat([x, torch.full((max_len - len(x),), 0)]) for x in input_ids]
+    labels = [torch.cat([y, torch.full((max_len - len(y),), -100)]) for y in labels]
+    return torch.stack(input_ids), torch.stack(labels)
+
+#load tokenizer and data
+tokenizer = Tokenizer(MODEL_PATH)
+url = "https://raw.githubusercontent.com/tatsu-lab/stanford_alpaca/main/alpaca_data.json"
+response = requests.get(url)
+data = response.json()
+data = data[:200]
+
+dataset = AlpacaDataset(data, tokenizer)
+dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate)
+
+#initialize the model
+args = ModelArgs()
+model = Llama(args).to(DEVICE)
+
+total_params = sum(p.numel() for p in model.parameters())
+trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+print(f"Trainable params: {trainable_params}, Total: {total_params}, Ratio: {trainable_params/total_params:.4f}")
+
+#freeze all parameters except A and B
+for name, param in model.named_parameters():
+    if "A" not in name and "B" not in name:
+        param.requires_grad = False
+
+#optimization and loss
+optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=LEARNING_RATE)
+scaler = torch.amp.GradScaler()
+loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
+
+#training loop
+model.train()
+step = 0
+for epoch in range(EPOCHS):
+    optimizer.zero_grad()
+    total_loss = 0
+    for i, (input_ids, labels) in enumerate(tqdm(dataloader)):
+        input_ids, labels = input_ids.to(DEVICE), labels.to(DEVICE)
+        with torch.amp.autocast('cuda'):
+            outputs = model(input_ids, start_pos=0)
+            loss = loss_fn(outputs.view(-1, outputs.size(-1)), labels.view(-1))
+            loss = loss / GRAD_ACCUM_STEPS
+        scaler.scale(loss).backward(retain_graph=True)
+        total_loss += loss.item()
+
+        if (i + 1) % GRAD_ACCUM_STEPS == 0:
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()
+            print(f"Step {step}, Loss: {total_loss:.4f}")
+            with open("training_log.txt", "a") as f:
+                f.write(f"Step {step}, Loss: {total_loss:.4f}\n")
+            total_loss = 0
+            step += 1
