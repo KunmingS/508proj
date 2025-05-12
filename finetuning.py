@@ -58,16 +58,17 @@ dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn
 
 #initialize the model
 args = ModelArgs()
+args.kv_caching = False  # Disable kv caching
 model = Llama(args).to(DEVICE)
-
-total_params = sum(p.numel() for p in model.parameters())
-trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-print(f"Trainable params: {trainable_params}, Total: {total_params}, Ratio: {trainable_params/total_params:.4f}")
 
 #freeze all parameters except A and B
 for name, param in model.named_parameters():
     if "A" not in name and "B" not in name:
         param.requires_grad = False
+
+total_params = sum(p.numel() for p in model.parameters())
+trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+print(f"Trainable params: {trainable_params}, Total: {total_params}, Ratio: {trainable_params/total_params:.4f}")
 
 #optimization and loss
 optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=LEARNING_RATE)
@@ -82,19 +83,21 @@ for epoch in range(EPOCHS):
     total_loss = 0
     for i, (input_ids, labels) in enumerate(tqdm(dataloader)):
         input_ids, labels = input_ids.to(DEVICE), labels.to(DEVICE)
+            
         with torch.amp.autocast('cuda'):
             outputs = model(input_ids, start_pos=0)
             loss = loss_fn(outputs.view(-1, outputs.size(-1)), labels.view(-1))
             loss = loss / GRAD_ACCUM_STEPS
-        scaler.scale(loss).backward(retain_graph=True)
+            
         total_loss += loss.item()
-
+        scaler.scale(loss).backward(retain_graph=True)
+        
         if (i + 1) % GRAD_ACCUM_STEPS == 0:
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
-            print(f"Step {step}, Loss: {total_loss:.4f}")
+            
+            print(f"Step {i + 1}, Loss: {total_loss:.4f}")
             with open("training_log.txt", "a") as f:
-                f.write(f"Step {step}, Loss: {total_loss:.4f}\n")
+                f.write(f"Step {i + 1}, Loss: {total_loss:.4f}\n")
             total_loss = 0
-            step += 1

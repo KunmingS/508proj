@@ -29,7 +29,7 @@ class ModelArgs: # fixed model configurations for Llama3.2-1B
     max_batch_size: int = 4  # for kv caching pre-allocation
     max_seq_len: int = 256   # for kv caching pre-allocation
 
-    kv_caching: bool = True
+    kv_caching: bool = False
 
 class RMSNorm(torch.nn.Module):
     def __init__(self, dim: int, eps: float = 1e-6):
@@ -372,17 +372,10 @@ class TransformerBlock(nn.Module):
             torch.Tensor: Output tensor after applying attention and feedforward layers.
 
         """
-        def inner_fn(x):
-            h = x + self.attention.forward(
-                self.attention_norm(x), start_pos, freqs_cis, mask
-            )
-            return h + self.feed_forward.forward(self.ffn_norm(h))
-
-        if self.training:
-            x.requires_grad_()
-            return checkpoint(inner_fn, x, use_reentrant=False)
-        else:
-            return inner_fn(x)
+        h = x + self.attention.forward(
+            self.attention_norm(x), start_pos, freqs_cis, mask
+        )
+        return h + self.feed_forward.forward(self.ffn_norm(h))
 
 
 class Llama(Generation):
@@ -446,11 +439,14 @@ class Llama(Generation):
             mask = torch.full(
                 (seqlen, seqlen), float("-inf"), device=tokens.device
             )
-
             mask = torch.triu(mask, diagonal=1)
 
-        for layer in self.layers:
-            h = layer(h, start_pos, freqs_cis, mask)
+        for block in self.layers:
+            if self.training:
+                h = checkpoint(block.forward, h, start_pos, freqs_cis, mask, use_reentrant=False)
+            else:
+                h = block(h, start_pos, freqs_cis, mask)
+
         h = self.norm(h)
         output = self.output(h).float()
         return output
