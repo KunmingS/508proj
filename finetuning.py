@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 from torch.utils.data import Dataset, DataLoader
 from llama.model import Llama, ModelArgs
@@ -15,6 +16,7 @@ GRAD_ACCUM_STEPS = 8
 LEARNING_RATE = 1e-5
 BATCH_SIZE = 1
 EPOCHS = 3
+USE_MIXED_PRECISION = True 
 
 #define the Alpaca dataset
 class AlpacaDataset(Dataset):
@@ -78,32 +80,52 @@ trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print(f"Trainable params: {trainable_params}, Total: {total_params}, Ratio: {trainable_params/total_params:.4f}")
 
 optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=2e-4)
-scaler = torch.amp.GradScaler()
+scaler = torch.amp.GradScaler() if USE_MIXED_PRECISION else None
 loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 
 model.train()
 step = 0
+step_times = []
 for epoch in range(EPOCHS):
     optimizer.zero_grad()
     total_loss = 0
     for i, (input_ids, labels) in enumerate(tqdm(dataloader)):
+        start = time.time()
         input_ids, labels = input_ids.to(DEVICE), labels.to(DEVICE)
             
-        with torch.amp.autocast('cuda'):
+        if USE_MIXED_PRECISION:
+            with torch.amp.autocast('cuda'):
+                outputs = model(input_ids, start_pos=0)
+                loss = loss_fn(outputs.view(-1, outputs.size(-1)), labels.view(-1))
+                loss = loss / GRAD_ACCUM_STEPS
+        else:
             outputs = model(input_ids, start_pos=0)
             loss = loss_fn(outputs.view(-1, outputs.size(-1)), labels.view(-1))
             loss = loss / GRAD_ACCUM_STEPS
             
-            
         total_loss += loss.item()
-        scaler.scale(loss).backward(retain_graph=True)
+        
+        if USE_MIXED_PRECISION:
+            scaler.scale(loss).backward(retain_graph=True)
+        else:
+            loss.backward(retain_graph=True)
         
         if (i + 1) % GRAD_ACCUM_STEPS == 0:
-            scaler.step(optimizer)
-            scaler.update()
+            if USE_MIXED_PRECISION:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
             optimizer.zero_grad()
             
             print(f"Step {i + 1}, Loss: {total_loss:.4f}")
-            with open("training_log.txt", "a") as f:
-                f.write(f"Step {i + 1}, Loss: {total_loss:.4f}\n")
+            
             total_loss = 0
+
+        end = time.time()
+        step_times.append(end - start)
+
+    avg_step_time = sum(step_times) / len(step_times)
+    print(f"Average step time: {avg_step_time:.2f}s")
+    print(f"Peak memory usage: {torch.cuda.max_memory_allocated() / (1024 ** 2):.2f}MB")
+
