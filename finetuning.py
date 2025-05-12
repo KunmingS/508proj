@@ -58,18 +58,15 @@ data = data[:200]
 dataset = AlpacaDataset(data, tokenizer)
 dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate)
 
-#initialize the model
 args = ModelArgs()
-args.kv_caching = False  # Disable kv caching
+args.kv_caching = False  
 model = Llama(args)
 
-# Load pretrained weights
 model_path = os.path.join(checkppoint_dir, "consolidated.00.pth")
 checkpoint = torch.load(model_path)
 model.load_state_dict(checkpoint, strict=False)  
 model = model.to(DEVICE)
 
-#freeze all parameters except LoRA parameters
 for name, param in model.named_parameters():
     if not any(x in name for x in ['lora', 'A', 'B']):
         param.requires_grad = False
@@ -80,12 +77,10 @@ total_params = sum(p.numel() for p in model.parameters())
 trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print(f"Trainable params: {trainable_params}, Total: {total_params}, Ratio: {trainable_params/total_params:.4f}")
 
-#optimization and loss
 optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=2e-4)
 scaler = torch.amp.GradScaler()
 loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 
-#training loop
 model.train()
 step = 0
 for epoch in range(EPOCHS):
@@ -99,11 +94,6 @@ for epoch in range(EPOCHS):
             loss = loss_fn(outputs.view(-1, outputs.size(-1)), labels.view(-1))
             loss = loss / GRAD_ACCUM_STEPS
             
-            # Decode and print model outputs
-            # predicted_tokens = outputs.argmax(dim=-1)
-            # for pred_seq in predicted_tokens:
-            #     decoded_text = tokenizer.decode(pred_seq.tolist())
-            #     print(f"Model output: {decoded_text}")
             
         total_loss += loss.item()
         scaler.scale(loss).backward(retain_graph=True)
