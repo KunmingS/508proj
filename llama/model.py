@@ -14,6 +14,8 @@ from llama.generation import Generation
 from llama.lora import LoRALinear
 from torch.utils.checkpoint import checkpoint
 
+USE_LORA = True
+
 @dataclass
 class ModelArgs: # fixed model configurations for Llama3.2-1B
     dim: int = 2048
@@ -196,8 +198,13 @@ class Attention(nn.Module):
         self.n_rep = self.n_local_heads // self.n_local_kv_heads
         self.head_dim = args.dim // args.n_heads
 
-        self.wq = LoRALinear(args.dim, args.n_heads * self.head_dim, r=16, alpha=32)
-        self.wv = LoRALinear(args.dim, self.n_kv_heads * self.head_dim, r=16, alpha=32)
+        if USE_LORA:
+            self.wq = LoRALinear(args.dim, args.n_heads * self.head_dim, r=16, alpha=32)
+            self.wv = LoRALinear(args.dim, self.n_kv_heads * self.head_dim, r=16, alpha=32)
+        else:
+            self.wq = nn.Linear(args.dim, args.n_heads * self.head_dim, bias=False)
+            self.wv = nn.Linear(args.dim, self.n_kv_heads * self.head_dim, bias=False)
+            
         self.wk = nn.Linear(args.dim, self.n_kv_heads * self.head_dim, bias=False)
         self.wo = nn.Linear(args.n_heads * self.head_dim, args.dim, bias=False)
 

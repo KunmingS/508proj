@@ -17,6 +17,7 @@ LEARNING_RATE = 1e-5
 BATCH_SIZE = 1
 EPOCHS = 3
 USE_MIXED_PRECISION = True 
+USE_LORA = True  
 
 #define the Alpaca dataset
 class AlpacaDataset(Dataset):
@@ -70,9 +71,13 @@ model.load_state_dict(checkpoint, strict=False)
 model = model.to(DEVICE)
 
 for name, param in model.named_parameters():
-    if not any(x in name for x in ['lora', 'A', 'B']):
-        param.requires_grad = False
+    if USE_LORA:
+        if not any(x in name for x in ['lora', 'A', 'B']):
+            param.requires_grad = False
+        else:
+            print(f"Trainable parameter: {name}")
     else:
+        param.requires_grad = True
         print(f"Trainable parameter: {name}")
 
 total_params = sum(p.numel() for p in model.parameters())
