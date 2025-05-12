@@ -84,7 +84,7 @@ total_params = sum(p.numel() for p in model.parameters())
 trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print(f"Trainable params: {trainable_params}, Total: {total_params}, Ratio: {trainable_params/total_params:.4f}")
 
-optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=2e-4)
+optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=LEARNING_RATE, momentum=0.9)
 scaler = torch.amp.GradScaler() if USE_MIXED_PRECISION else None
 loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 
