@@ -15,7 +15,7 @@ class LoRALinear(nn.Module):
 
         #LoRA learnable weights.
         self.A = nn.Parameter(torch.randn(r, in_features) * 0.01)
-        self.B = nn.Parameter(torch.randn(out_features, r) * 0.01)
+        self.B = nn.Parameter(torch.zeros(out_features, r)) 
 
         self.bias = nn.Parameter(torch.zeros(out_features), requires_grad=bias)
 

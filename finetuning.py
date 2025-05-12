@@ -31,12 +31,14 @@ class AlpacaDataset(Dataset):
             prompt += "\n" + self.data[idx]["input"]
         target = self.data[idx]["output"]
 
+        combined_text = prompt + target
+        
+        combined_ids = self.tokenizer.encode(combined_text, bos=True, eos=True)
         prompt_ids = self.tokenizer.encode(prompt, bos=True, eos=False)
-        target_ids = self.tokenizer.encode(target, bos=False, eos=True)
-        input_ids = prompt_ids + target_ids
-        labels = [-100] * len(prompt_ids) + target_ids  # prompt 部分不参与 loss
+        
+        labels = [-100] * len(prompt_ids) + combined_ids[len(prompt_ids):]
 
-        return torch.tensor(input_ids), torch.tensor(labels)
+        return torch.tensor(combined_ids), torch.tensor(labels)
 
 #pading aligning
 def collate(batch):
@@ -54,24 +56,33 @@ data = response.json()
 data = data[:200]
 
 dataset = AlpacaDataset(data, tokenizer)
-dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate)
+generator = torch.Generator(device=DEVICE)
+dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate, generator=generator)
 
 #initialize the model
 args = ModelArgs()
 args.kv_caching = False  # Disable kv caching
-model = Llama(args).to(DEVICE)
+model = Llama(args)
 
-#freeze all parameters except A and B
+# Load pretrained weights
+model_path = os.path.join(checkppoint_dir, "consolidated.00.pth")
+checkpoint = torch.load(model_path, map_location="cpu")
+model.load_state_dict(checkpoint, strict=False)  
+model = model.to(DEVICE)
+
+#freeze all parameters except LoRA parameters
 for name, param in model.named_parameters():
-    if "A" not in name and "B" not in name:
+    if not any(x in name for x in ['lora', 'A', 'B']):
         param.requires_grad = False
+    else:
+        print(f"Trainable parameter: {name}")
 
 total_params = sum(p.numel() for p in model.parameters())
 trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print(f"Trainable params: {trainable_params}, Total: {total_params}, Ratio: {trainable_params/total_params:.4f}")
 
 #optimization and loss
-optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=LEARNING_RATE)
+optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=2e-4)
 scaler = torch.amp.GradScaler()
 loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 
@@ -90,10 +101,10 @@ for epoch in range(EPOCHS):
             loss = loss / GRAD_ACCUM_STEPS
             
             # Decode and print model outputs
-            predicted_tokens = outputs.argmax(dim=-1)
-            for pred_seq in predicted_tokens:
-                decoded_text = tokenizer.decode(pred_seq.tolist())
-                print(f"Model output: {decoded_text}")
+            # predicted_tokens = outputs.argmax(dim=-1)
+            # for pred_seq in predicted_tokens:
+            #     decoded_text = tokenizer.decode(pred_seq.tolist())
+            #     print(f"Model output: {decoded_text}")
             
         total_loss += loss.item()
         scaler.scale(loss).backward(retain_graph=True)
