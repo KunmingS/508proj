@@ -89,6 +89,12 @@ for epoch in range(EPOCHS):
             loss = loss_fn(outputs.view(-1, outputs.size(-1)), labels.view(-1))
             loss = loss / GRAD_ACCUM_STEPS
             
+            # Decode and print model outputs
+            predicted_tokens = outputs.argmax(dim=-1)
+            for pred_seq in predicted_tokens:
+                decoded_text = tokenizer.decode(pred_seq.tolist())
+                print(f"Model output: {decoded_text}")
+            
         total_loss += loss.item()
         scaler.scale(loss).backward(retain_graph=True)
         
