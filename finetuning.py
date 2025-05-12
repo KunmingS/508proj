@@ -56,8 +56,7 @@ data = response.json()
 data = data[:200]
 
 dataset = AlpacaDataset(data, tokenizer)
-generator = torch.Generator(device=DEVICE)
-dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate, generator=generator)
+dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate)
 
 #initialize the model
 args = ModelArgs()
@@ -66,7 +65,7 @@ model = Llama(args)
 
 # Load pretrained weights
 model_path = os.path.join(checkppoint_dir, "consolidated.00.pth")
-checkpoint = torch.load(model_path, map_location="cpu")
+checkpoint = torch.load(model_path)
 model.load_state_dict(checkpoint, strict=False)  
 model = model.to(DEVICE)
 
