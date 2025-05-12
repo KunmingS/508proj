@@ -125,7 +125,7 @@ for epoch in range(EPOCHS):
         end = time.time()
         step_times.append(end - start)
 
-    avg_step_time = sum(step_times) / len(step_times)
-    print(f"Average step time: {avg_step_time:.2f}s")
-    print(f"Peak memory usage: {torch.cuda.max_memory_allocated() / (1024 ** 2):.2f}MB")
+avg_step_time = sum(step_times) / len(step_times)
+print(f"Average step time: {avg_step_time:.2f}s")
+print(f"Peak memory usage: {torch.cuda.max_memory_allocated() / (1024 ** 2):.2f}MB")
 
