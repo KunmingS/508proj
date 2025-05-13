@@ -32,6 +32,7 @@ class ModelArgs: # fixed model configurations for Llama3.2-1B
     max_seq_len: int = 256   # for kv caching pre-allocation
 
     kv_caching: bool = False
+    use_checkpoint: bool = True  # whether to use gradient checkpointing
 
 class RMSNorm(torch.nn.Module):
     def __init__(self, dim: int, eps: float = 1e-6):
@@ -449,7 +450,7 @@ class Llama(Generation):
             mask = torch.triu(mask, diagonal=1)
 
         for block in self.layers:
-            if self.training:
+            if self.training and self.params.use_checkpoint:
                 h = checkpoint(block.forward, h, start_pos, freqs_cis, mask, use_reentrant=False)
             else:
                 h = block(h, start_pos, freqs_cis, mask)

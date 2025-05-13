@@ -16,8 +16,9 @@ GRAD_ACCUM_STEPS = 8
 LEARNING_RATE = 5e-3
 BATCH_SIZE = 1
 EPOCHS = 3
-USE_MIXED_PRECISION = True 
-USE_LORA = True  
+USE_MIXED_PRECISION = True
+USE_LORA = True
+USE_CHECKPOINT = False
 
 #define the Alpaca dataset
 class AlpacaDataset(Dataset):
@@ -80,7 +81,8 @@ dataset = AlpacaDataset(data, tokenizer)
 dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate)
 
 args = ModelArgs()
-args.kv_caching = False  
+args.kv_caching = False
+args.use_checkpoint = USE_CHECKPOINT
 model = Llama(args)
 
 model_path = os.path.join(checkppoint_dir, "consolidated.00.pth")
@@ -152,8 +154,10 @@ for epoch in range(EPOCHS):
         end = time.time()
         step_times.append(end - start)
 
+print(f"Lora: {USE_LORA}, Mixed Precision: {USE_MIXED_PRECISION}, Checkpoint: {USE_CHECKPOINT}")
 avg_step_time = sum(step_times) / len(step_times)
 print(f"Average step time: {avg_step_time:.2f}s")
 print(f"Peak memory usage: {torch.cuda.max_memory_allocated() / (1024 ** 2):.2f}MB")
+# print status of lora and mixed precision
 
-test_model(model, dataset, tokenizer)
+
