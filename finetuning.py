@@ -13,7 +13,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 checkppoint_dir = os.path.expanduser("~/.llama/checkpoints/Llama3.2-1B")
 MODEL_PATH = os.path.join(checkppoint_dir, "tokenizer.model")
 GRAD_ACCUM_STEPS = 8
-LEARNING_RATE = 1e-5
+LEARNING_RATE = 5e-3
 BATCH_SIZE = 1
 EPOCHS = 3
 USE_MIXED_PRECISION = True 
@@ -42,6 +42,15 @@ class AlpacaDataset(Dataset):
         labels = [-100] * len(prompt_ids) + combined_ids[len(prompt_ids):]
 
         return torch.tensor(combined_ids), torch.tensor(labels)
+    
+    def get_first_data_item(self):
+        prompt = self.data[0]["instruction"]
+        if self.data[0]["input"]:
+            prompt += "\n" + self.data[0]["input"]
+        print(prompt)
+        prompt_ids = self.tokenizer.encode(prompt, bos=True, eos=False)
+        return torch.tensor(prompt_ids).unsqueeze(0)
+        
 
 #pading aligning
 def collate(batch):
@@ -50,6 +59,15 @@ def collate(batch):
     input_ids = [torch.cat([x, torch.full((max_len - len(x),), 0)]) for x in input_ids]
     labels = [torch.cat([y, torch.full((max_len - len(y),), -100)]) for y in labels]
     return torch.stack(input_ids), torch.stack(labels)
+
+def test_model(model, dataset, tokenizer):
+    model.eval()
+    first_data_item = dataset.get_first_data_item()
+    res = model(first_data_item.to(DEVICE), start_pos=0)
+    # Get the token IDs from the model's output
+    token_ids = res.argmax(dim=-1)[0].tolist()
+    decoded_output = tokenizer.decode(token_ids)
+    print(decoded_output)
 
 #load tokenizer and data
 tokenizer = Tokenizer(MODEL_PATH)
@@ -84,9 +102,11 @@ total_params = sum(p.numel() for p in model.parameters())
 trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print(f"Trainable params: {trainable_params}, Total: {total_params}, Ratio: {trainable_params/total_params:.4f}")
 
-optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=LEARNING_RATE, momentum=0.9)
+optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=LEARNING_RATE)
 scaler = torch.amp.GradScaler() if USE_MIXED_PRECISION else None
 loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
+
+test_model(model, dataset, tokenizer)
 
 model.train()
 step = 0
@@ -124,9 +144,11 @@ for epoch in range(EPOCHS):
             optimizer.zero_grad()
             
             print(f"Step {i + 1}, Loss: {total_loss:.4f}")
-            
-            total_loss = 0
+            with open("training_log.txt", "a") as f:
+                f.write(f"Epoch {epoch + 1}, Step {i + 1}, Loss: {total_loss:.4f}\n")
 
+            total_loss = 0
+            
         end = time.time()
         step_times.append(end - start)
 
@@ -134,3 +156,4 @@ avg_step_time = sum(step_times) / len(step_times)
 print(f"Average step time: {avg_step_time:.2f}s")
 print(f"Peak memory usage: {torch.cuda.max_memory_allocated() / (1024 ** 2):.2f}MB")
 
+test_model(model, dataset, tokenizer)
